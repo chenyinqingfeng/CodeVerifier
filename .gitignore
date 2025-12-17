@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+
+# Data folder
+data/
+
+# Build artifacts
+*.exe
+*_extracted/
+build/
+dist/
+
+# Temp files
+*.c
+*.log
+imports_report.txt
+pyinstxtractor.py
+
+# IDE
+.idea/
+.vscode/
+*.swp
