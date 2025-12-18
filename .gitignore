@@ -23,3 +23,5 @@ pyinstxtractor.py
 .idea/
 .vscode/
 *.swp
+AGENTS.md
+AGENTS_CN.md
