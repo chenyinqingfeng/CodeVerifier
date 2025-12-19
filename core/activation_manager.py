@@ -275,8 +275,12 @@ class ActivationManager:
         logging.info("启动软件激活流程")
 
         # 安全检测：反调试、反虚拟机
-        safe, _ = check_security()
+        safe, reason = check_security()
         if not safe:
+            # 清除设备身份信息，强制重新生成设备ID
+            if reason in ("debugger", "vm"):
+                from .security_check import _clear_device_identity
+                _clear_device_identity()
             sys.exit(0)
 
         ok, error_msg = app_state.ensure_identity()

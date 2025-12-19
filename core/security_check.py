@@ -11,6 +11,21 @@ from PySide6.QtCore import QTimer
 # 缓存虚拟机检测结果（虚拟机状态不会变）
 _vm_cache = None
 
+
+def _clear_device_identity():
+    """清除设备身份信息（设备ID和激活密钥）"""
+    try:
+        from .state_manager import app_state
+        # 删除所有设备身份相关的数据
+        app_state.update({
+            "device_id": "",
+            "license_key": "",
+            "uuid_ref": "",
+            "device_rand": ""
+        })
+    except Exception:
+        pass  # 静默失败，不暴露任何信息
+
 def is_debugger_present() -> bool:
     """检测调试器"""
     try:
@@ -95,6 +110,7 @@ class SecurityGuard:
     def _check(self):
         """定时检测"""
         if is_debugger_present():
+            _clear_device_identity()  # 清除设备身份
             sys.exit(0)
 
 
@@ -107,6 +123,7 @@ def timing_check(func):
         elapsed = time.perf_counter() - start
         # 正常执行应该很快，超过2秒说明被调试
         if elapsed > 2.0:
+            _clear_device_identity()  # 清除设备身份
             sys.exit(0)
         return result
     return wrapper
