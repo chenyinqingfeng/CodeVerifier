@@ -189,42 +189,6 @@ class UIConfigManager:
             'repeat': repeat
         })
 
-    # ==================== 打印锁定机制 ====================
-
-    def is_print_locked(self) -> bool:
-        """检查打印是否被锁定"""
-        return self.get('print_auto_print_locked', False)
-
-    def get_locked_code(self) -> Optional[str]:
-        """获取当前锁定的条码"""
-        locked_code = self.get('print_locked_code', '')
-        return locked_code if locked_code else None
-
-    def lock_print(self, barcode: str) -> bool:
-        """锁定打印"""
-        return all([
-            self.set('print_auto_print_locked', True),
-            self.set('print_locked_code', barcode),
-            self.set('print_last_printed_code', barcode)
-        ])
-
-    def unlock_print(self) -> bool:
-        """解锁打印"""
-        return all([
-            self.set('print_auto_print_locked', False),
-            self.set('print_locked_code', '')
-        ])
-
-    # ==================== 打印匹配纠错功能 ====================
-
-    def is_print_match_correction_enabled(self) -> bool:
-        """检查打印匹配纠错功能是否启用"""
-        return self.get('print_match_correction_enabled', True)  # 默认开启
-
-    def set_print_match_correction_enabled(self, enabled: bool) -> bool:
-        """设置打印匹配纠错功能开关"""
-        return self.set('print_match_correction_enabled', enabled, 'print', 'bool')
-
     # ==================== 打印配方管理 ====================
 
     def get_print_recipes(self) -> list:
@@ -266,6 +230,16 @@ class UIConfigManager:
         if recipe:
             return recipe.get('auto_print_repeat_count', 1)
         return 1
+
+    # ==================== 二码合一锁定验证功能 ====================
+
+    def is_verify_lock_enabled(self) -> bool:
+        """检查二码合一锁定验证功能是否启用"""
+        return self.get('verify_lock_enabled', True)  # 默认开启
+
+    def set_verify_lock_enabled(self, enabled: bool) -> bool:
+        """设置二码合一锁定验证功能开关"""
+        return self.set('verify_lock_enabled', enabled, 'verify', 'bool')
 
     # ==================== 内部辅助方法 ====================
 

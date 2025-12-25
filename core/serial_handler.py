@@ -176,14 +176,22 @@ class SerialHandler(QObject):
 
         except serial.SerialException as e:
             self._connection_status[port_key] = False
-            self.connection_changed.emit(port_key, False)
-            self.error_occurred.emit(port_key, f"串口连接失败: {e}")
+            # 安全发射信号：避免对象已删除时崩溃
+            try:
+                self.connection_changed.emit(port_key, False)
+                self.error_occurred.emit(port_key, f"串口连接失败: {e}")
+            except (RuntimeError, TypeError):
+                pass
             self._log(f"[ERROR] 串口 {port_name} ({port_key}) 连接失败: {e}")
 
         except Exception as e:
             self._connection_status[port_key] = False
-            self.connection_changed.emit(port_key, False)
-            self.error_occurred.emit(port_key, f"串口异常: {e}")
+            # 安全发射信号：避免对象已删除时崩溃
+            try:
+                self.connection_changed.emit(port_key, False)
+                self.error_occurred.emit(port_key, f"串口异常: {e}")
+            except (RuntimeError, TypeError):
+                pass
             self._log(f"[ERROR] 串口 {port_name} ({port_key}) 异常: {e}")
 
         finally:

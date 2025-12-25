@@ -462,7 +462,7 @@ class PrintPage(BasePage):
         parent_layout.addWidget(group)
 
     def _setup_enable_section(self, parent_layout):
-        """设置启用开关（两个复选框同一行）"""
+        """设置启用开关"""
         enable_frame = QFrame()
         enable_layout = QHBoxLayout(enable_frame)
         enable_layout.setContentsMargins(0, 0, 0, 0)
@@ -472,12 +472,6 @@ class PrintPage(BasePage):
         self.enable_check.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         self.enable_check.stateChanged.connect(self._on_enable_changed)
         enable_layout.addWidget(self.enable_check)
-
-        self.correction_check = QCheckBox("打印后锁定验证")
-        self.correction_check.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
-        self.correction_check.setToolTip("启用后，打印成功后必须两把枪都扫到相同条码才能继续")
-        self.correction_check.stateChanged.connect(self._on_correction_changed)
-        enable_layout.addWidget(self.correction_check)
 
         enable_layout.addStretch()
 
@@ -668,42 +662,7 @@ class PrintPage(BasePage):
         title.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_LG, QFont.Bold))
         header_layout.addWidget(title)
 
-        # 锁定状态显示
-        lock_title = QLabel("锁定:")
-        lock_title.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
-        lock_title.setStyleSheet(f"color: {Colors.TEXT_SECONDARY_LIGHT};")
-        lock_title.hide()
-        header_layout.addWidget(lock_title)
-        self._lock_title_label = lock_title
-
-        self.lock_status_label = QLabel("未锁定")
-        self.lock_status_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
-        self.lock_status_label.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
-        self.lock_status_label.hide()  # 默认隐藏，功能启用时显示
-        header_layout.addWidget(self.lock_status_label)
-
         header_layout.addStretch()
-
-        # 手动解锁按钮
-        self.manual_unlock_btn = QPushButton("🔓 手动解锁")
-        self.manual_unlock_btn.setMinimumHeight(40)
-        self.manual_unlock_btn.setCursor(Qt.PointingHandCursor)
-        self.manual_unlock_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {Colors.WARNING};
-                color: white;
-                border: none;
-                border-radius: {Sizes.RADIUS_SM}px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {Colors.WARNING_DARK};
-            }}
-        """)
-        self.manual_unlock_btn.clicked.connect(self._manual_unlock)
-        self.manual_unlock_btn.hide()  # 默认隐藏，功能启用且锁定时显示
-        header_layout.addWidget(self.manual_unlock_btn)
 
         # 手动打印按钮
         self.manual_print_btn = QPushButton("🖨 手动打印")
@@ -801,7 +760,6 @@ class PrintPage(BasePage):
             # 从全局配置加载启用开关、打印机等
             config = self.ui_config.get_print_config()
             self.enable_check.setChecked(config.get('enabled', False))
-            self.correction_check.setChecked(self.ui_config.is_print_match_correction_enabled())
 
             # 恢复当前条码
             current_print = config.get('current_print', '')
@@ -841,7 +799,6 @@ class PrintPage(BasePage):
 
             self._loading = False
             self._update_preview()
-            self._update_lock_status(False, "")
 
         except Exception as e:
             self._loading = False
@@ -946,18 +903,6 @@ class PrintPage(BasePage):
         """启用状态改变"""
         self._save_config()
 
-    def _on_correction_changed(self, state):
-        """纠错功能状态改变"""
-        enabled = state == Qt.CheckState.Checked.value
-        self.ui_config.set_print_match_correction_enabled(enabled)
-        self._log(f"[INFO] 打印后锁定验证已{'启用' if enabled else '禁用'}")
-        # 更新锁定状态显示（根据功能开关状态）
-        self._update_lock_status(False, "")
-        # 通知TopBar同步更新（通过scan_controller发信号）
-        main_window = self._get_main_window()
-        if main_window and hasattr(main_window, 'scan_controller'):
-            main_window.scan_controller.print_lock_changed.emit(False, "")
-
     def _on_printer_changed(self, text):
         """打印机选择改变"""
         if not self._loading:
@@ -1016,9 +961,9 @@ class PrintPage(BasePage):
                 dialog = LoginDialog(auth_manager, self, required_role='admin')
                 if dialog.exec() != QDialog.Accepted:
                     return  # 用户取消登录
-                # 登录成功，更新导航栏状态
+                # 登录成功，刷新侧边栏用户状态
                 if hasattr(main_window, 'sidebar'):
-                    main_window.sidebar.update_user_info(auth_manager.get_current_user())
+                    main_window.sidebar.refresh_user_info()
 
         # 执行真实打印
         self._do_print(barcode)
@@ -1098,62 +1043,6 @@ class PrintPage(BasePage):
         """外部设置条码（用于扫码自动填入）"""
         self.barcode_input.setText(barcode)
 
-    def _manual_unlock(self):
-        """手动解锁打印锁定模式（需要admin权限）"""
-        main_window = self._get_main_window()
-
-        # 权限检查：需要 admin (2级) 及以上权限
-        if main_window and hasattr(main_window, 'auth_manager'):
-            auth_manager = main_window.auth_manager
-            if not auth_manager.has_permission('admin'):
-                # 弹出登录对话框
-                from ..dialogs.login_dialog import LoginDialog
-                from PySide6.QtWidgets import QDialog
-                dialog = LoginDialog(auth_manager, self, required_role='admin')
-                if dialog.exec() != QDialog.Accepted:
-                    return  # 用户取消登录
-                # 登录成功，更新导航栏状态
-                if hasattr(main_window, 'sidebar'):
-                    main_window.sidebar.update_user_info(auth_manager.get_current_user())
-
-        # 执行解锁
-        if main_window and hasattr(main_window, 'scan_controller'):
-            main_window.scan_controller.manual_unlock_print()
-            self.show_message("提示", "已手动解锁打印锁定状态", "info")
-            self._update_lock_status(False, "")
-        else:
-            self.show_message("错误", "无法获取扫码控制器", "error")
-
-    def _update_lock_status(self, is_locked: bool, locked_code: str):
-        """更新锁定状态显示"""
-        # 检查功能是否启用
-        correction_enabled = self.ui_config.is_print_match_correction_enabled()
-
-        if not correction_enabled:
-            # 功能未启用，隐藏所有组件
-            self._lock_title_label.hide()
-            self.lock_status_label.hide()
-            self.manual_unlock_btn.hide()
-            return
-
-        # 功能已启用，始终显示状态标签和解锁按钮
-        self._lock_title_label.show()
-        self.lock_status_label.show()
-        self.manual_unlock_btn.show()
-
-        if is_locked and locked_code:
-            # 已锁定状态
-            self.lock_status_label.setText(locked_code)
-            self.lock_status_label.setStyleSheet(f"color: {Colors.WARNING};")
-        else:
-            # 未锁定状态
-            self.lock_status_label.setText("未锁定")
-            self.lock_status_label.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
-
-    def on_print_lock_changed(self, is_locked: bool, locked_code: str):
-        """响应打印锁定状态变化（由外部调用）"""
-        self._update_lock_status(is_locked, locked_code)
-
     def refresh(self):
         """刷新页面"""
         self._loading = True
@@ -1230,8 +1119,9 @@ class PrintPage(BasePage):
                 dialog = LoginDialog(auth_manager, self, required_role='admin')
                 if dialog.exec() != QDialog.Accepted:
                     return
+                # 登录成功，刷新侧边栏用户状态
                 if hasattr(main_window, 'sidebar'):
-                    main_window.sidebar.update_user_info(auth_manager.get_current_user())
+                    main_window.sidebar.refresh_user_info()
         # 弹出输入框
         from PySide6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self, "新建配方", "请输入配方名称:")
@@ -1274,8 +1164,9 @@ class PrintPage(BasePage):
                 dialog = LoginDialog(auth_manager, self, required_role='admin')
                 if dialog.exec() != QDialog.Accepted:
                     return
+                # 登录成功，刷新侧边栏用户状态
                 if hasattr(main_window, 'sidebar'):
-                    main_window.sidebar.update_user_info(auth_manager.get_current_user())
+                    main_window.sidebar.refresh_user_info()
         # 确认删除
         from PySide6.QtWidgets import QMessageBox
         recipe_name = self.recipe_combo.currentText()

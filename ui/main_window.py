@@ -4,9 +4,9 @@
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QLabel, QFrame, QMessageBox
+    QLabel, QFrame, QMessageBox, QPushButton, QDialog, QCheckBox
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent
 from PySide6.QtGui import QFont
 
 from .styles import GLOBAL_STYLESHEET, Colors, Fonts, Sizes
@@ -62,7 +62,10 @@ class MainWindow(QMainWindow):
         self._center_window()
 
         # 初始化锁定状态显示
-        self._on_print_lock_changed(False, "")
+        self._on_verification_lock_changed(False, "")
+
+        # 从数据库加载锁定验证开关状态
+        self._load_verify_lock_state()
 
     def _setup_ui(self):
         """设置UI"""
@@ -133,56 +136,111 @@ class MainWindow(QMainWindow):
     def _setup_scan_status(self, parent_layout):
         """设置扫码状态显示"""
         self.scan_status_frame = QFrame()
+        self.scan_status_frame.setFixedHeight(48)  # 固定高度
         scan_layout = QHBoxLayout(self.scan_status_frame)
         scan_layout.setContentsMargins(30, 0, 0, 0)
-        scan_layout.setSpacing(20)
+        scan_layout.setSpacing(15)
+        scan_layout.setAlignment(Qt.AlignVCenter)  # 垂直居中对齐
+        scan_layout.addStretch()
 
         # 正面扫码状态
         front_label = QLabel("正面:")
         front_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         front_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY_LIGHT};")
+        front_label.setAlignment(Qt.AlignVCenter)
         scan_layout.addWidget(front_label)
 
         self.front_scan_status = QLabel("等待扫码")
         self.front_scan_status.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         self.front_scan_status.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
+        self.front_scan_status.setAlignment(Qt.AlignVCenter)
         scan_layout.addWidget(self.front_scan_status)
 
         # 反面扫码状态
         back_label = QLabel("反面:")
         back_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         back_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY_LIGHT};")
+        back_label.setAlignment(Qt.AlignVCenter)
         scan_layout.addWidget(back_label)
 
         self.back_scan_status = QLabel("等待扫码")
         self.back_scan_status.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         self.back_scan_status.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
+        self.back_scan_status.setAlignment(Qt.AlignVCenter)
         scan_layout.addWidget(self.back_scan_status)
-
-        # 打印锁定状态（在结果前面显示）
-        lock_label = QLabel("锁定:")
-        lock_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
-        lock_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY_LIGHT};")
-        lock_label.hide()
-        scan_layout.addWidget(lock_label)
-        self._lock_title_label = lock_label  # 保存引用
-
-        self.print_lock_label = QLabel("未锁定")
-        self.print_lock_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
-        self.print_lock_label.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
-        self.print_lock_label.hide()  # 默认隐藏，功能启用时显示
-        scan_layout.addWidget(self.print_lock_label)
 
         # 结果状态
         result_label = QLabel("结果:")
         result_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         result_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY_LIGHT};")
+        result_label.setAlignment(Qt.AlignVCenter)
         scan_layout.addWidget(result_label)
 
         self.result_scan_status = QLabel("等待扫码")
         self.result_scan_status.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
         self.result_scan_status.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
+        self.result_scan_status.setAlignment(Qt.AlignVCenter)
         scan_layout.addWidget(self.result_scan_status)
+
+        # ========== 二码合一锁定控制区域 ==========
+        scan_layout.addSpacing(20)
+
+        # 锁定验证开关
+        self.lock_check = QCheckBox("锁定验证")
+        self.lock_check.setChecked(True)
+        self.lock_check.setCursor(Qt.PointingHandCursor)
+        self.lock_check.setStyleSheet(f"""
+            QCheckBox {{
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QCheckBox:checked {{
+                color: {Colors.SUCCESS};
+            }}
+            QCheckBox:unchecked {{
+                color: {Colors.TEXT_MUTED_LIGHT};
+            }}
+        """)
+        # 使用事件过滤器拦截点击，先验证权限再切换状态
+        self.lock_check.installEventFilter(self)
+        self.lock_check.stateChanged.connect(self._on_lock_check_changed)
+        scan_layout.addWidget(self.lock_check)
+
+        # 锁定状态显示（跟随开关）
+        lock_title_label = QLabel("锁定:")
+        lock_title_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
+        lock_title_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY_LIGHT};")
+        lock_title_label.setAlignment(Qt.AlignVCenter)
+        scan_layout.addWidget(lock_title_label)
+        self._lock_title_label = lock_title_label
+
+        self._lock_code_label = QLabel("未锁定")
+        self._lock_code_label.setFont(QFont(Fonts.FAMILY, Fonts.SIZE_SM))
+        self._lock_code_label.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
+        self._lock_code_label.setAlignment(Qt.AlignVCenter)
+        scan_layout.addWidget(self._lock_code_label)
+
+        # 手动解锁按钮
+        self.manual_unlock_btn = QPushButton("🔓 解锁")
+        self.manual_unlock_btn.setFixedHeight(22)
+        self.manual_unlock_btn.setCursor(Qt.PointingHandCursor)
+        self.manual_unlock_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Colors.WARNING};
+                color: white;
+                border: none;
+                border-radius: {Sizes.RADIUS_SM}px;
+                padding: 0px 10px;
+                font-weight: bold;
+                font-size: 11px;
+                line-height: 22px;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.WARNING_DARK};
+            }}
+        """)
+        self.manual_unlock_btn.clicked.connect(self._on_manual_verify_unlock)
+        scan_layout.addWidget(self.manual_unlock_btn)
 
         parent_layout.addWidget(self.scan_status_frame)
 
@@ -535,33 +593,120 @@ class MainWindow(QMainWindow):
         # 批次统计更新
         self.scan_controller.batch_stats_updated.connect(self._on_batch_stats_updated)
 
-        # 打印锁定状态更新
-        self.scan_controller.print_lock_changed.connect(self._on_print_lock_changed)
+        # 锁定状态更新（二码合一锁定）
+        self.scan_controller.verification_lock_changed.connect(self._on_verification_lock_changed)
 
-    def _on_print_lock_changed(self, is_locked: bool, locked_code: str):
-        """打印锁定状态变化"""
-        # 检查功能是否启用
-        correction_enabled = self.ui_config.is_print_match_correction_enabled()
+    def eventFilter(self, obj, event):
+        """事件过滤器，拦截锁定验证开关的点击"""
+        if obj == self.lock_check and event.type() == QEvent.MouseButtonPress:
+            # 加锁防止重复点击
+            if hasattr(self, '_lock_filter_busy') and self._lock_filter_busy:
+                return True
 
-        if not correction_enabled:
-            # 功能未启用，隐藏
+            # 保存用户意图（点击后应该切换到相反状态）
+            intended_checked = not self.lock_check.isChecked()
+            self._lock_filter_busy = True
+
+            # 权限检查
+            if not self.auth_manager.has_permission('admin'):
+                from .dialogs.login_dialog import LoginDialog
+                dialog = LoginDialog(self.auth_manager, self, required_role='admin')
+                if dialog.exec() != QDialog.Accepted:
+                    # 权限验证失败，阻止点击
+                    self._lock_filter_busy = False
+                    return True  # 拦截，不让checkbox切换
+
+                # 登录成功，刷新侧边栏用户状态
+                self.sidebar.refresh_user_info()
+
+            # 权限通过，手动设置到目标状态（使用blockSignals防止信号触发）
+            self.lock_check.blockSignals(True)
+            self._lock_filter_busy = False
+            self.lock_check.setChecked(intended_checked)
+            self.lock_check.blockSignals(False)
+
+            # 手动触发_on_lock_check_changed保存配置
+            self._on_lock_check_changed(Qt.CheckState.Checked.value if intended_checked else Qt.CheckState.Unchecked.value)
+            return True  # 拦截，不让checkbox自己处理
+
+        return super().eventFilter(obj, event)
+
+    def _on_lock_check_changed(self, state):
+        """锁定验证状态变化后的UI刷新"""
+        # 快速点击防护
+        if hasattr(self, '_lock_filter_busy') and self._lock_filter_busy:
+            return
+
+        enabled = state == Qt.CheckState.Checked.value
+
+        # 更新锁定相关控件的显示/隐藏
+        self._lock_title_label.setVisible(enabled)
+        self._lock_code_label.setVisible(enabled)
+        self.manual_unlock_btn.setVisible(enabled)
+
+        if not enabled:
+            if self.scan_controller.is_verify_locked():
+                self.scan_controller.manual_unlock_verify()
+
+        # 保存配置到数据库
+        self.ui_config.set_verify_lock_enabled(enabled)
+
+    def _load_verify_lock_state(self):
+        """从数据库加载锁定验证开关状态（使用blockSignals防止信号触发）"""
+        enabled = self.ui_config.is_verify_lock_enabled()
+
+        # 使用blockSignals防止setChecked触发_on_lock_check_changed
+        self.lock_check.blockSignals(True)
+        self.lock_check.setChecked(enabled)
+        self.lock_check.blockSignals(False)
+
+        # 更新scan_controller的锁定模式
+        self.scan_controller.set_verify_lock_mode(enabled)
+
+        # 手动调用_on_verification_lock_changed初始化锁定状态显示
+        # 注意：此时scan_controller可能还没有锁定条码，传入False和空字符串
+        self._on_verification_lock_changed(False, "")
+
+    def _on_verification_lock_changed(self, is_locked: bool, locked_code: str):
+        """锁定状态变化（二码合一锁定）"""
+        # 检查锁定功能是否启用
+        lock_enabled = self.lock_check.isChecked()
+
+        if not lock_enabled:
+            # 锁定功能未启用，隐藏相关控件
             self._lock_title_label.hide()
-            self.print_lock_label.hide()
-        else:
-            # 功能已启用，始终显示
-            self._lock_title_label.show()
-            self.print_lock_label.show()
-            if is_locked and locked_code:
-                self.print_lock_label.setText(locked_code)
-                self.print_lock_label.setStyleSheet(f"color: {Colors.WARNING};")
-            else:
-                self.print_lock_label.setText("未锁定")
-                self.print_lock_label.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
+            self._lock_code_label.hide()
+            self.manual_unlock_btn.hide()
+            return
 
-        # 同步更新打印页面的锁定状态
-        print_page = self.pages.get("print")
-        if print_page and hasattr(print_page, 'on_print_lock_changed'):
-            print_page.on_print_lock_changed(is_locked, locked_code)
+        # 锁定功能开启，显示所有相关控件
+        self._lock_title_label.show()
+        self._lock_code_label.show()
+        self.manual_unlock_btn.show()
+
+        if is_locked and locked_code:
+            self._lock_code_label.setText(locked_code)
+            self._lock_code_label.setStyleSheet(f"color: {Colors.WARNING};")
+        else:
+            self._lock_code_label.setText("未锁定")
+            self._lock_code_label.setStyleSheet(f"color: {Colors.TEXT_MUTED_LIGHT};")
+
+    def _on_manual_verify_unlock(self):
+        """手动解锁验证锁定（需要2级及以上权限）"""
+        # 权限检查：需要 admin (2级) 及以上权限
+        if not self.auth_manager.has_permission('admin'):
+            # 弹出登录对话框
+            from .dialogs.login_dialog import LoginDialog
+            dialog = LoginDialog(self.auth_manager, self, required_role='admin')
+            if dialog.exec() != QDialog.Accepted:
+                return  # 用户取消登录
+            # 登录成功，刷新侧边栏用户状态
+            self.sidebar.refresh_user_info()
+
+        # 权限验证通过，执行解锁
+        self.scan_controller.manual_unlock_verify()
+        self._on_verification_lock_changed(False, "")
+        self._log("[INFO] 已手动解锁验证锁定状态")
 
     def _on_front_code_received(self, code: str):
         """正面扫码数据接收"""
@@ -647,6 +792,10 @@ class MainWindow(QMainWindow):
         scan_page = self.pages.get("scan")
         if scan_page:
             scan_page.update_tab_stats(batch_id, matched_count, total_count)
+
+    def _log(self, message: str):
+        """记录日志"""
+        print(message)
 
     def closeEvent(self, event):
         """关闭事件"""

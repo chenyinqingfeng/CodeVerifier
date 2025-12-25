@@ -157,10 +157,12 @@ INSERT OR IGNORE INTO ui_settings (key, value, category, data_type, description)
 ('print_text_gap', '-1.0', 'print', 'float', '文字与条码间距（mm）'),
 ('print_font_size', '12', 'print', 'int', '文字字体大小'),
 ('print_current_print', '', 'print', 'string', '当前打印条码'),
-('print_last_printed_code', '', 'print', 'string', '最后打印的条码'),
-('print_auto_print_locked', 'false', 'print', 'bool', '自动打印锁定状态'),
-('print_locked_code', '', 'print', 'string', '当前锁定的条码'),
-('print_match_correction_enabled', 'true', 'print', 'bool', '启用打印条码匹配纠错功能');
+
+-- ============================================
+-- 4.5 锁定验证配置
+-- 用途: 二码合一锁定验证功能开关
+-- ============================================
+('verify_lock_enabled', 'true', 'verify', 'bool', '启用二码合一锁定验证功能');
 
 -- ============================================
 -- 5. 打印配方表 (print_recipes)

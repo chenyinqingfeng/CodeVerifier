@@ -16,9 +16,25 @@ from ..styles import Colors, Fonts, Sizes
 # 更新日志数据
 CHANGELOGS = [
     {
+        "version": "V3.7",
+        "date": "2025-12-25",
+        "author": "MiniMax-M2.1 & 魏俊辉",
+        "changes": [
+            "【重构】二码合一锁定逻辑重构，锁定时机从打印成功后改为第一面扫码匹配后",
+            "【重构】锁定状态控制从打印页面移到扫码验证页面TOPBAR",
+            "【新增】锁定验证开关（需2级权限），可随时开启/关闭锁定功能",
+            "【新增】TOPBAR锁定状态显示：锁定验证开关 + 当前锁定条码 + 手动解锁按钮",
+            "【新增】事件过滤器实现先验证权限再切换状态，防止权限漏洞",
+            "【新增】解锁按钮图标和文字使用line-height统一垂直居中",
+            "【优化】使用blockSignals防止登录取消时状态切换信号混乱",
+            "【优化】登录成功自动更新侧边栏用户状态显示",
+            "【移除】打印页面中所有锁定验证相关UI选项（已移至扫码验证页面）",
+        ]
+    },
+    {
         "version": "V3.6",
         "date": "2025-12-13",
-        "author": "Claude 魏俊辉",
+        "author": "Claude & 魏俊辉",
         "changes": [
             "【新增】打印配方管理功能，支持保存多套打印参数组合",
             "【新增】配方一键切换，快速切换不同标签规格",
@@ -35,7 +51,7 @@ CHANGELOGS = [
     {
         "version": "V3.5",
         "date": "2025-12-12",
-        "author": "Claude 魏俊辉",
+        "author": "Claude & 魏俊辉",
         "changes": [
             "【新增】打印后锁定验证功能，防止漏扫、错扫、不匹配",
             "【新增】打印成功后自动锁定，两把枪都扫到相同条码才能解锁",
@@ -50,7 +66,7 @@ CHANGELOGS = [
     {
         "version": "V3.4",
         "date": "2025-12-08",
-        "author": "Claude 魏俊辉",
+        "author": "Claude & 魏俊辉",
         "changes": [
             "【新增】语音播报功能，扫码结果自动语音提示",
             "【新增】语音播报设置：启用/禁用、音量调节、播报次数",
@@ -64,7 +80,7 @@ CHANGELOGS = [
     {
         "version": "V3.3",
         "date": "2025-12-01",
-        "author": "Claude 魏俊辉",
+        "author": "Claude & 魏俊辉",
         "changes": [
             "【新增】更新日志页面，可查看历史版本更新内容",
             "【优化】侧边栏折叠功能，折叠按钮更大更清晰",
@@ -84,7 +100,7 @@ CHANGELOGS = [
     {
         "version": "V3.2",
         "date": "2025-11-15",
-        "author": "Claude 魏俊辉",
+        "author": "Claude & 魏俊辉",
         "changes": [
             "【新增】PySide6 Qt版本全新重构",
             "【新增】现代化UI界面设计",
@@ -103,7 +119,7 @@ CHANGELOGS = [
     {
         "version": "V3.1",
         "date": "2025-10-01",
-        "author": "Claude 魏俊辉",
+        "author": "Claude & 魏俊辉",
         "changes": [
             "【新增】CustomTkinter版本",
             "【新增】基础扫码验证功能",

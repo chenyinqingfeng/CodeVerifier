@@ -46,11 +46,8 @@ class ScanController(QObject):
     # 扫码状态重置
     scan_status_reset = Signal()
 
-    # 打印信号
-    print_completed = Signal(str, bool)  # (barcode, success)
-
-    # 打印锁定信号
-    print_lock_changed = Signal(bool, str)  # (is_locked, locked_code)
+    # 锁定状态信号（用于二码合一锁定）
+    verification_lock_changed = Signal(bool, str)  # (is_locked, locked_code)
 
     def __init__(self, db_manager: DatabaseManager, ui_config: UIConfigManager):
         super().__init__()
@@ -68,11 +65,11 @@ class ScanController(QObject):
         self._is_single_mode = False
         self._single_scan_step = "front"  # 单枪模式当前步骤
 
-        # 打印锁定状态（内存维护，重启后自动解锁）
-        self._print_lock_mode = False      # 是否处于打印锁定模式
-        self._print_locked_code = ""       # 锁定的条码
-        self._lock_front_matched = False   # 正面枪是否已扫到正确码
-        self._lock_back_matched = False    # 反面枪是否已扫到正确码
+        # 二码合一锁定模式（第一面扫码匹配后锁定，等待另一面）
+        self._verify_lock_mode = False           # 是否处于锁定模式
+        self._verify_locked_code = ""            # 锁定的条码值
+        self._verify_locked_side = ""            # 锁定时哪一面先扫（front/back）
+        self._verify_locked_info = None          # 锁定时的条码数据库信息
 
         # 清空定时器
         self._clear_timer: Optional[QTimer] = None
@@ -190,41 +187,27 @@ class ScanController(QObject):
         else:
             self.back_code_received.emit(data)
 
-        # ========== 打印锁定模式检查 ==========
-        if self._print_lock_mode and self._print_locked_code:
-            if data != self._print_locked_code:
-                # 条码不匹配锁定的条码，报警并拒绝
-                self._log(f"[ERROR] 锁定模式: 条码不匹配，期望={self._print_locked_code}，实际={data}")
+        # ========== 二码合一锁定模式检查 ==========
+        if self._verify_lock_mode and self._verify_locked_code:
+            # 检查新扫码是否与锁定条码一致
+            if data != self._verify_locked_code:
+                # 条码不匹配锁定条码，报警并拒绝
+                self._log(f"[ERROR] 锁定模式: 条码不匹配，锁定={self._verify_locked_code}，实际={data}")
                 self.db_manager.log_scan(
                     scanner_port=current_side,
                     scan_data=data,
                     scan_result='lock_mismatch',
-                    result_message=f'锁定条码不匹配，期望: {self._print_locked_code}'
+                    result_message=f'锁定条码不匹配，锁定: {self._verify_locked_code}'
                 )
                 self.send_to_plc("FAIL")
-                self._voice.announce_lock_mismatch()  # 语音：解锁条码错误（只有错误时才额外播报）
-                self.verification_failed.emit(data, f"解锁条码错误，期望: {self._print_locked_code}")
+                self._voice.announce_lock_mismatch()
+                self.verification_failed.emit(data, f"条码不匹配，锁定: {self._verify_locked_code}")
                 # 不清空缓存，让用户重新扫正确的码覆盖
                 return
             else:
-                # 条码匹配，记录该枪已匹配
-                self._log(f"[OK] 锁定模式: {current_side} 条码匹配正确")
-                self.send_to_plc("PASS")  # 解除报警，给用户正反馈
-                if current_side == "front":
-                    self._lock_front_matched = True
-                else:
-                    self._lock_back_matched = True
-                # 注意：不额外播报语音，正常流程会自动播报"正面匹配"/"反面匹配"
-
-                # 检查是否两枪都匹配了
-                if self._lock_front_matched and self._lock_back_matched:
-                    self._log(f"[OK] 锁定模式: 两枪都匹配成功，解锁")
-                    self._exit_print_lock_mode()
-                    # 继续正常流程（不return，往下走进入二码验证）
-                else:
-                    # 只有一把枪匹配，等待另一把
-                    self._log(f"[INFO] 锁定模式: 等待另一把枪扫码")
-                    # 这里不return，让条码进入正常的缓存流程
+                # 条码匹配锁定条码，正常进入缓存流程
+                self._log(f"[OK] 锁定模式: {current_side} 条码匹配锁定码，继续验证")
+                # 不return，继续进入正常缓存流程
 
         # 立即检查该条码状态（每次扫码都要单独查询）
         check_result = self._check_barcode_status(data)
@@ -267,6 +250,13 @@ class ScanController(QObject):
                 is_first_scan = not self.back_code
                 self.front_code = data
                 self.front_code_info = check_result
+
+                # 第一把枪扫码后立即进入锁定模式
+                if is_first_scan:
+                    self._enter_verify_lock_mode(data, current_side, check_result)
+                    # 第一次扫码，播报"正面匹配"
+                    self._voice.announce_front_matched()
+
                 # 立即记录日志 - 等待反面
                 self.db_manager.log_scan(
                     scanner_port=current_side,
@@ -274,12 +264,8 @@ class ScanController(QObject):
                     scan_result='waiting',
                     result_message='等待反面扫码'
                 )
-                # 正面扫码时立即触发自动打印（传入当前扫码枪）
+                # 正面扫码时立即触发自动打印
                 self._auto_print_on_scan(data, check_result.get('barcode_id'), current_side)
-
-                # 第一把枪正常时播报"正面匹配"
-                if is_first_scan:
-                    self._voice.announce_front_matched()
 
                 if self._is_single_mode:
                     self._single_scan_step = "back"
@@ -289,6 +275,13 @@ class ScanController(QObject):
                 is_first_scan = not self.front_code
                 self.back_code = data
                 self.back_code_info = check_result
+
+                # 第一把枪扫码后立即进入锁定模式
+                if is_first_scan:
+                    self._enter_verify_lock_mode(data, current_side, check_result)
+                    # 第一次扫码，播报"反面匹配"
+                    self._voice.announce_back_matched()
+
                 # 立即记录日志 - 等待正面或准备验证
                 self.db_manager.log_scan(
                     scanner_port=current_side,
@@ -296,12 +289,8 @@ class ScanController(QObject):
                     scan_result='waiting',
                     result_message='等待正面扫码' if not self.front_code else '准备二码验证'
                 )
-                # 反面扫码时也触发自动打印（传入当前扫码枪）
+                # 反面扫码时也触发自动打印
                 self._auto_print_on_scan(data, check_result.get('barcode_id'), current_side)
-
-                # 第一把枪正常时播报"反面匹配"
-                if is_first_scan:
-                    self._voice.announce_back_matched()
 
                 if self._is_single_mode:
                     self._single_scan_step = "front"
@@ -429,8 +418,12 @@ class ScanController(QObject):
         """
         首次验证条码（二码合一验证通过后调用）
         此时条码状态已确认为未匹配(unmatched)
+        验证成功后解锁，允许下一个循环
         """
         try:
+            # 二码合一验证成功，先解锁
+            self._exit_verify_lock_mode()
+
             scan_time = get_local_time_str()
             barcode_id = info['barcode_id']
             batch_id = info['batch_id']
@@ -539,11 +532,7 @@ class ScanController(QObject):
                     WHERE id = ?
                 """, (print_time, barcode_id))
                 self._log(f"[OK] 扫码打印成功: {barcode}")
-
-                # 如果启用了打印匹配纠错功能，进入锁定模式
-                # 打印成功时，触发打印的那把枪已经扫到正确码了，直接标记
-                if self.ui_config.is_print_match_correction_enabled():
-                    self._enter_print_lock_mode(barcode, trigger_side)
+                # 注意：锁定模式已在第一面扫码时触发，不再在此处触发
             else:
                 self._log(f"[WARN] 扫码打印失败: {barcode}")
 
@@ -595,46 +584,55 @@ class ScanController(QObject):
         """打印完成回调"""
         self.print_completed.emit(barcode, success)
 
-    # ==================== 打印锁定模式管理 ====================
+    # ==================== 二码合一锁定模式管理 ====================
 
-    def _enter_print_lock_mode(self, barcode: str, trigger_side: str = "front"):
-        """进入打印锁定模式
+    def _enter_verify_lock_mode(self, barcode: str, side: str, info: dict):
+        """进入二码合一锁定模式（第一面扫码匹配后立即锁定）
 
         Args:
             barcode: 锁定的条码
-            trigger_side: 触发打印的扫码枪（front/back），该枪已扫到正确码
+            side: 触发锁定的扫码枪（front/back）
+            info: 条码数据库信息
         """
-        self._print_lock_mode = True
-        self._print_locked_code = barcode
-        # 触发打印的那把枪已经扫到正确码了，直接标记
-        self._lock_front_matched = (trigger_side == "front")
-        self._lock_back_matched = (trigger_side == "back")
-        self._log(f"[INFO] 进入打印锁定模式，锁定条码: {barcode}，{trigger_side}枪已匹配")
-        self.print_lock_changed.emit(True, barcode)
+        self._verify_lock_mode = True
+        self._verify_locked_code = barcode
+        self._verify_locked_side = side
+        self._verify_locked_info = info
+        self._log(f"[INFO] 进入锁定模式，锁定条码: {barcode}，{side}枪先扫")
+        self.verification_lock_changed.emit(True, barcode)
 
-    def _exit_print_lock_mode(self):
-        """退出打印锁定模式"""
-        old_code = self._print_locked_code
-        self._print_lock_mode = False
-        self._print_locked_code = ""
-        self._lock_front_matched = False
-        self._lock_back_matched = False
-        self._log(f"[INFO] 退出打印锁定模式，原锁定条码: {old_code}")
-        self.print_lock_changed.emit(False, "")
+    def _exit_verify_lock_mode(self):
+        """退出二码合一锁定模式"""
+        old_code = self._verify_locked_code
+        self._verify_lock_mode = False
+        self._verify_locked_code = ""
+        self._verify_locked_side = ""
+        self._verify_locked_info = None
+        self._log(f"[INFO] 退出锁定模式，原锁定条码: {old_code}")
+        self.verification_lock_changed.emit(False, "")
 
-    def is_print_locked(self) -> bool:
-        """检查是否处于打印锁定模式"""
-        return self._print_lock_mode
+    def is_verify_locked(self) -> bool:
+        """检查是否处于锁定模式"""
+        return self._verify_lock_mode
 
-    def get_print_locked_code(self) -> str:
+    def get_verify_locked_code(self) -> str:
         """获取当前锁定的条码"""
-        return self._print_locked_code if self._print_lock_mode else ""
+        return self._verify_locked_code if self._verify_lock_mode else ""
 
-    def manual_unlock_print(self):
-        """手动解锁打印锁定模式"""
-        if self._print_lock_mode:
-            self._log(f"[INFO] 手动解锁打印锁定模式")
-            self._exit_print_lock_mode()
+    def set_verify_lock_mode(self, enabled: bool):
+        """设置锁定模式开关"""
+        if enabled and not self._verify_lock_mode:
+            # 开启锁定模式但不锁定具体条码（等待第一次扫码匹配）
+            pass
+        elif not enabled and self._verify_lock_mode:
+            # 关闭锁定模式时先解锁
+            self.manual_unlock_verify()
+
+    def manual_unlock_verify(self):
+        """手动解锁锁定模式"""
+        if self._verify_lock_mode:
+            self._log(f"[INFO] 手动解锁锁定模式")
+            self._exit_verify_lock_mode()
 
     def _schedule_clear(self, delay_ms: int):
         """延迟清空扫码数据"""
@@ -653,6 +651,9 @@ class ScanController(QObject):
         self.front_code_info = None
         self.back_code_info = None
         self._single_scan_step = "front"
+        # 确保锁定状态也被清除
+        if self._verify_lock_mode:
+            self._exit_verify_lock_mode()
         self.scan_status_reset.emit()
 
     # ==================== 手动操作 ====================
