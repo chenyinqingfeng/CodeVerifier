@@ -80,9 +80,9 @@ Build.bat
 
 ## 📄 License
 
-Private - 仅供学习交流和技术展示
+本项目采用 [MIT License](LICENSE) 开源。
 
----
+允许自由使用、复制、修改、合并、发布、分发和商用，但须保留原始版权声明和许可证文本。
 
 <p align="center">
   <sub>Built with ❤️ by Wei Junhui</sub>
